@@ -1,0 +1,235 @@
+<html>
+<script src='https://d3js.org/d3.v7.min.js'></script>
+<style>
+    circle {
+        fill: lightblue;
+        stroke: black;
+    }
+</style>
+
+<body onload='init()'>
+    <button id="scene1-btn">Scene 1 (2020)</button>
+    <button id="scene2-btn">Scene 2 (2021)</button>
+    <button id="scene3-btn">Scene 3 (2022)</button>
+    <div id="graph-container"></div>
+    <div id="text-container"></div>
+    <script>
+        var data = {};
+        var text = {
+            "2020": "Number of cases gradually increases in 2020 until it reached a peak in Dec 2020",
+            "2021": "Number of cases reaches peak in Jan and Dec in 2021. It reaches a minimum in June 2021. In general we can see there are more cases in the winter than the summer.",
+            "2022": "Number of cases goes down since Jan 2022, and keeps at a low level since Match 2022."
+        }
+        async function init() {
+            data = await d3.csv("https://raw.githubusercontent.com/jsc723/cs416-project/master/us.csv");
+            data.forEach(d => {
+                d.cases = +d.cases;
+                d.deaths = +d.deaths;
+            });
+            data[0].inc_cases = data[0].cases;
+            data[0].inc_deaths = data[0].deaths;
+            for(let i = 1; i < data.length; i++) {
+                data[i].inc_cases = data[i].cases - data[i-1].cases;
+                data[i].inc_deaths = data[i].deaths - data[i-1].deaths;
+            }
+            console.log(data);
+            navigateToScene("2020");
+        }
+        // Function to render the segmented graph for a specific year
+        function renderGraph(data, year) {
+            // Filter the data for the given year
+            const filteredData = data.filter(d => d.date.startsWith(year));
+            // Group the filtered data by month
+            const groupedData = d3.group(filteredData, d => d.date.slice(0, 7));
+
+            // Flatten the grouped data back into an array
+            const flattenedData = Array.from(groupedData, ([date, values]) => {
+                const totalCases = d3.sum(values, d => d.cases);
+                const totalDeaths = d3.sum(values, d => d.deaths);
+                const totalIncCases = d3.sum(values, d => d.inc_cases);
+                const totalIncDeaths = d3.sum(values, d => d.inc_deaths);
+                return { date, cases: totalCases, deaths: totalDeaths, inc_cases: totalIncCases, inc_deaths: totalIncDeaths };
+            });
+            const dataToUse = flattenedData;
+
+            const container = d3.select("#graph-container"); // Select the container element
+
+            // Clear the container
+            container.html("");
+            const textContainer = d3.select("#text-container"); // Select the text container element
+            textContainer.html(text[year]);
+
+            const height = 550, width = 850, margin=80;
+
+            // Set up the SVG element
+            const svg = container.append("svg")
+                .attr("width", width) // Adjust dimensions as needed
+                .attr("height", height)
+                .style("border", "1px solid #ccc");
+
+            // Set up scales for x and y axes
+            const xScale = d3.scaleBand()
+                .domain(flattenedData.map(d => d.date))
+                .range([margin, width-margin]) // Adjust range based on container size
+            svg.append("g")
+                .attr("transform", "translate(0,"+(height-margin)+")")
+                .call(d3.axisBottom(xScale));
+
+            const yScale = d3.scaleLinear()
+                .domain([0, d3.max(flattenedData, d => d.inc_cases + d.inc_deaths)])
+                .range([height-margin, margin]); // Adjust range based on container size
+            svg.append("g")
+                .attr("transform", `translate(${margin},0)`)
+                .call(d3.axisLeft(yScale));
+
+            // Define line generator
+            const line = d3.line()
+                .x(d => xScale(d.date) + xScale.bandwidth() / 2)
+                .y(d => yScale(d.inc_cases))
+                .curve(d3.curveMonotoneX);
+
+            // Draw line
+            svg.append("path")
+                .datum(flattenedData)
+                .attr("fill", "none")
+                .attr("stroke", "steelblue")
+                .attr("stroke-width", 2)
+                .attr("d", line);
+
+            // Create a tooltip
+            const tooltip = d3.select("#graph-container")
+                .append("div")
+                .style("position", "absolute")
+                .style("background-color", "white")
+                .style("border", "1px solid #ccc")
+                .style("padding", "10px")
+                .style("visibility", "hidden")
+                .style("font-family", "system-ui");
+
+            // Add circles to data points
+            svg.selectAll("circle")
+                .data(flattenedData)
+                .enter()
+                .append("circle")
+                .attr("cx", d => xScale(d.date) + xScale.bandwidth() / 2)
+                .attr("cy", d => yScale(d.inc_cases))
+                .attr("r", 6)
+                .attr("fill", "steelblue")
+                .on("mouseover", (event, d) => {
+                    // Show tooltip on mouseover
+                    tooltip.style("visibility", "visible")
+                        .html(`Date: ${d.date}<br>Cases: ${d.inc_cases}<br>Deaths: ${d.inc_deaths}`)
+                        .style("left", event.pageX + 10 + "px")
+                        .style("top", event.pageY + 10 + "px");
+                })
+                .on("mouseout", () => {
+                    // Hide tooltip on mouseout
+                    tooltip.style("visibility", "hidden");
+                });
+
+            // Add labels to the x axis
+            svg.selectAll("text")
+                .data(flattenedData)
+                .enter()
+                .append("text")
+                .text(d => d.date)
+                .attr("x", d => xScale(d.date) + xScale.bandwidth() / 2)
+                .attr("y", height-20) // Adjust y position as needed
+                .style("font-family", "system-ui")
+                .style("text-anchor", "middle");
+
+            // Add labels to the y axis
+            svg.append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -height/2) // Adjust x position as needed
+                .attr("y", 20) // Adjust y position as needed
+                .style("font-family", "system-ui")
+                .text("Cases");
+            // Add labels to the x axis
+            svg.append("text")
+                .attr("x", (width-margin)/2) // Adjust x position as needed
+                .attr("y", height-20) // Adjust y position as needed
+                .style("font-family", "system-ui")
+                .text("Dates");
+            // Add a title to the graph
+            svg.append("text")
+                .attr("x", (width-margin)/2-180) // Adjust x position as needed
+                .attr("y", 40) // Adjust y position as needed
+                .style("font-weight", "bold")
+                .style("font-size", "20px")
+                .style("font-family", "system-ui")
+                .text(`Number of COVID-19 Cases in United States in ${year}`);
+
+        
+            // Add an annotation to a specific data point
+            function annotate(date, fAnnotation) {
+                const annotationData = flattenedData.find(d => d.date === date);
+                if (annotationData) {
+                    //console.log(annotationData)
+                    svg.append("circle")
+                        .attr("cx", xScale(annotationData.date) + xScale.bandwidth() / 2)
+                        .attr("cy", yScale(annotationData.inc_cases))
+                        .attr("r", 12)
+                        .attr("fill", "red")
+                        .on("mouseover", (event) => {
+                            // Show tooltip on mouseover
+                            tooltip.style("visibility", "visible")
+                                .html(`Date: ${annotationData.date}<br>Cases: ${annotationData.inc_cases}<br>Deaths: ${annotationData.inc_deaths}`)
+                                .style("left", event.pageX + 10 + "px")
+                                .style("top", event.pageY + 10 + "px");
+                        })
+                        .on("mouseout", () => {
+                            // Hide tooltip on mouseout
+                            tooltip.style("visibility", "hidden");
+                        });
+
+
+                    svg.append("text")
+                        .text(fAnnotation(annotationData))
+                        .attr("x", xScale(annotationData.date) + xScale.bandwidth() / 2)
+                        .attr("y", yScale(annotationData.inc_cases) - 14)
+                        .style("text-anchor", "middle")
+                        .style("font-weight", "bold")
+                        .style("font-family", "system-ui")
+                        .style("fill", "red");
+                }
+            }
+            if (year == '2020') {
+                annotate('2020-12', (d)=>`a peak happened at ${d.date}`);
+            }
+            if (year == '2021') {
+                annotate('2021-01', (d)=>`a peak happened at ${d.date}`);
+                annotate('2021-06', (d)=>`a minimum happened at ${d.date}`);
+                annotate('2021-12', (d)=>`a peak happened at ${d.date}`);
+            }
+            if (year == '2022') {
+                annotate('2022-01', (d)=>`a peak happened at ${d.date}`);
+                annotate('2022-03', (d)=>`keeps low and stable since ${d.date}`);
+            }
+
+
+        }
+
+        // Function to handle navigation and switch between scenes
+        function navigateToScene(year) {
+            renderGraph(data, year);
+        }
+
+        // Add event listeners to navigation buttons
+        document.getElementById("scene1-btn").addEventListener("click", () => {
+            navigateToScene("2020");
+        });
+
+        document.getElementById("scene2-btn").addEventListener("click", () => {
+            navigateToScene("2021");
+        });
+
+        document.getElementById("scene3-btn").addEventListener("click", () => {
+            navigateToScene("2022");
+        });
+
+        
+    </script>
+</body>
+
+</html>
